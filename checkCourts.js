@@ -5,6 +5,7 @@ const puppeteer = require('puppeteer');
 const { LOGIN_URL, BOOKING_URL, SELECTORS } = require('./config');
 
 const STATE_FILE = path.join(__dirname, 'state.json');
+const FAILURE_SCREENSHOT = path.join(__dirname, 'failure.png');
 
 function loadState() {
   if (fs.existsSync(STATE_FILE)) {
@@ -38,12 +39,82 @@ async function sendTelegram(message) {
   console.log('Telegram notification sent.');
 }
 
+async function dumpFailure(page) {
+  const url = page.url();
+  const title = await page.title().catch(() => '');
+  const text = await page
+    .evaluate(() => (document.body && document.body.innerText ? document.body.innerText.slice(0, 2000) : ''))
+    .catch(() => '');
+  console.error('Failed at', url);
+  console.error('Title:', title);
+  console.error('Page text:\n', text);
+  await page.screenshot({ path: FAILURE_SCREENSHOT, fullPage: true }).catch((err) => {
+    console.error('Screenshot failed:', err.message);
+  });
+}
+
+async function signIn(page, username, password) {
+  await page.goto(LOGIN_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  if (!page.url().includes('sso.miraflores.gob.pe')) {
+    return;
+  }
+
+  await page.waitForSelector(SELECTORS.usernameInput, { timeout: 20000 });
+  await page.type(SELECTORS.usernameInput, username);
+  await page.type(SELECTORS.passwordInput, password);
+  await Promise.all([
+    page.click(SELECTORS.loginButton),
+    page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {}),
+  ]);
+  await page.waitForFunction(
+    () => document.body && document.body.innerText.includes('Cerrar Sesión'),
+    { timeout: 30000 }
+  );
+}
+
+async function openCalendar(page) {
+  await page.goto(BOOKING_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.waitForFunction(
+    () => document.body && document.body.innerText.includes('Elige Fecha y Hora'),
+    { timeout: 30000 }
+  );
+
+  await page.evaluate((sel) => {
+    const el = document.querySelector(sel);
+    if (el) {
+      el.click();
+    }
+  }, SELECTORS.dateFieldToOpenCalendar);
+
+  await page.waitForFunction(
+    (dayCell) => document.querySelectorAll(dayCell).length > 0,
+    { timeout: 30000 },
+    SELECTORS.dayCell
+  );
+}
+
+async function readDays(page) {
+  return page.$$eval(
+    SELECTORS.dayCell,
+    (cells, { availableClass, fullClass, disabledClass }) =>
+      cells.map((c) => ({
+        label: c.getAttribute('aria-label') || c.textContent.trim(),
+        available: c.classList.contains(availableClass),
+        full: c.classList.contains(fullClass),
+        disabled: c.classList.contains(disabledClass),
+      })),
+    SELECTORS
+  );
+}
+
 (async () => {
   const browser = await puppeteer.launch({
     headless: 'new',
-    args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
   });
   const page = await browser.newPage();
+  await page.setViewport({ width: 1400, height: 900 });
+  page.setDefaultTimeout(60000);
 
   try {
     const username = process.env.MIRAFLORES_USERNAME;
@@ -52,52 +123,14 @@ async function sendTelegram(message) {
       throw new Error('Missing MIRAFLORES_USERNAME or MIRAFLORES_PASSWORD env vars.');
     }
 
-    // 1. Go to the app. If not logged in, it redirects to Keycloak SSO.
-    await page.goto(LOGIN_URL, { waitUntil: 'networkidle2' });
-
-    const onKeycloak = page.url().includes('sso.miraflores.gob.pe');
-    if (onKeycloak) {
-      await page.waitForSelector(SELECTORS.usernameInput, { timeout: 15000 });
-      await page.type(SELECTORS.usernameInput, username);
-      await page.type(SELECTORS.passwordInput, password);
-      await Promise.all([
-        page.click(SELECTORS.loginButton),
-        page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {}),
-      ]);
-      await page.waitForFunction(
-        () => document.body && document.body.innerText.includes('Cerrar Sesión'),
-        { timeout: 20000 }
-      );
-    }
+    await signIn(page, username, password);
     console.log('Logged in at', page.url());
 
-    // 2. Go to the booking calendar page. Angular mounts the calendar after
-    // networkidle, so give it a beat before waiting on day cells.
-    await page.goto(BOOKING_URL, { waitUntil: 'networkidle2' });
-    await new Promise((r) => setTimeout(r, 2500));
-    await page.waitForFunction(
-      (dayCell) => document.querySelectorAll(dayCell).length > 0,
-      { timeout: 20000 },
-      SELECTORS.dayCell
-    );
+    await openCalendar(page);
     console.log('Calendar loaded at', page.url());
 
-    // 4. Read every day cell's status from its class list + aria-label.
-    const days = await page.$$eval(
-      SELECTORS.dayCell,
-      (cells, { availableClass, fullClass, disabledClass }) =>
-        cells.map((c) => ({
-          label: c.getAttribute('aria-label') || c.textContent.trim(),
-          available: c.classList.contains(availableClass),
-          full: c.classList.contains(fullClass),
-          disabled: c.classList.contains(disabledClass),
-        })),
-      SELECTORS
-    );
-
+    const days = await readDays(page);
     const availableDates = days.filter((d) => d.available).map((d) => d.label);
-
-    // 5. Compare against last run.
     const state = loadState();
     const newDates = availableDates.filter((d) => !state.knownAvailable.includes(d));
 
@@ -116,6 +149,7 @@ async function sendTelegram(message) {
     saveState(state);
   } catch (err) {
     console.error('Error checking courts:', err);
+    await dumpFailure(page);
     await sendTelegram(`⚠️ Court-checker script hit an error: ${err.message}`);
     process.exitCode = 1;
   } finally {
