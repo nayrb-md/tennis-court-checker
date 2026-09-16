@@ -25,7 +25,7 @@ Signs in to [apps.miraflores.gob.pe](https://apps.miraflores.gob.pe) with your c
 `config.js` already has the selectors for the live booking site.
 
 - **Sign-in.** The app redirects to Keycloak SSO at `sso.miraflores.gob.pe`. The username and password fields use `#username` and `#password`. The **Sign In** control is `button[name="login"]`, not Keycloak's default `#kc-login`.
-- **Calendar.** Paso 1 (**Elige Fecha y Hora**) shows an inline flatpickr calendar. Day cells use `.flatpickr-day`.
+- **Calendar.** Paso 1 (**Elige Fecha y Hora**) uses a flatpickr popup. Open it by selecting **Elige una fecha**, then read `.flatpickr-day` cells.
 - **Day status.** `disponible` is bookable (green), `ocupada` is full (red), and `no-disponible` is grey (in the past or not released yet).
 
 If the site layout changes and the script can't find those elements, capture the live page:
