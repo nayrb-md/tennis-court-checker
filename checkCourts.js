@@ -53,31 +53,49 @@ async function dumpFailure(page) {
   });
 }
 
-async function signIn(page, username, password) {
-  await page.goto(LOGIN_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
-  if (!page.url().includes('sso.miraflores.gob.pe')) {
-    return;
-  }
-
+async function fillKeycloak(page, username, password) {
   await page.waitForSelector(SELECTORS.usernameInput, { timeout: 20000 });
+  await page.click(SELECTORS.usernameInput, { clickCount: 3 });
   await page.type(SELECTORS.usernameInput, username);
   await page.type(SELECTORS.passwordInput, password);
-  await Promise.all([
-    page.click(SELECTORS.loginButton),
-    page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {}),
-  ]);
+  await page.click(SELECTORS.loginButton);
   await page.waitForFunction(
     () => document.body && document.body.innerText.includes('Cerrar Sesión'),
     { timeout: 30000 }
   );
 }
 
-async function openCalendar(page) {
-  await page.goto(BOOKING_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
+async function waitForSsoOrText(page, text) {
   await page.waitForFunction(
-    () => document.body && document.body.innerText.includes('Elige Fecha y Hora'),
-    { timeout: 30000 }
+    (needle) =>
+      location.href.includes('sso.miraflores.gob.pe') ||
+      (document.body && document.body.innerText.includes(needle)),
+    { timeout: 30000 },
+    text
   );
+}
+
+async function signIn(page, username, password) {
+  await page.goto(LOGIN_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  // The app URL loads first; Keycloak is a later redirect. Don't treat the
+  // pre-redirect URL as an existing session.
+  await waitForSsoOrText(page, 'Cerrar Sesión');
+  if (page.url().includes('sso.miraflores.gob.pe')) {
+    await fillKeycloak(page, username, password);
+  }
+}
+
+async function openCalendar(page, username, password) {
+  await page.goto(BOOKING_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await waitForSsoOrText(page, 'Elige Fecha y Hora');
+  if (page.url().includes('sso.miraflores.gob.pe')) {
+    await fillKeycloak(page, username, password);
+    await page.goto(BOOKING_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await page.waitForFunction(
+      () => document.body && document.body.innerText.includes('Elige Fecha y Hora'),
+      { timeout: 30000 }
+    );
+  }
 
   await page.evaluate((sel) => {
     const el = document.querySelector(sel);
@@ -126,7 +144,7 @@ async function readDays(page) {
     await signIn(page, username, password);
     console.log('Logged in at', page.url());
 
-    await openCalendar(page);
+    await openCalendar(page, username, password);
     console.log('Calendar loaded at', page.url());
 
     const days = await readDays(page);
