@@ -5,7 +5,6 @@ const puppeteer = require('puppeteer');
 const { LOGIN_URL, BOOKING_URL, SELECTORS } = require('./config');
 
 const STATE_FILE = path.join(__dirname, 'state.json');
-const FAILURE_SCREENSHOT = path.join(__dirname, 'failure.png');
 
 function loadState() {
   if (fs.existsSync(STATE_FILE)) {
@@ -39,32 +38,19 @@ async function sendTelegram(message) {
   console.log('Telegram notification sent.');
 }
 
-async function dumpFailure(page) {
-  const url = page.url();
-  const title = await page.title().catch(() => '');
-  const details = await page
-    .evaluate(() => ({
-      text: document.body && document.body.innerText ? document.body.innerText.slice(0, 2000) : '',
-      dayCount: document.querySelectorAll('.flatpickr-day').length,
-      calendarCount: document.querySelectorAll('.flatpickr-calendar').length,
-      inputs: [...document.querySelectorAll('input')].map((el) => ({
-        placeholder: el.placeholder,
-        className: String(el.className),
-        display: getComputedStyle(el).display,
-      })),
-    }))
-    .catch(() => ({}));
-  console.error('Failed at', url);
-  console.error('Title:', title);
-  console.error('Calendar debug:', JSON.stringify(details, null, 2));
-  await page.screenshot({ path: FAILURE_SCREENSHOT, fullPage: true }).catch((err) => {
-    console.error('Screenshot failed:', err.message);
-  });
-}
+async function signIn(page, username, password) {
+  await page.goto(LOGIN_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.waitForFunction(
+    () =>
+      location.href.includes('sso.miraflores.gob.pe') ||
+      (document.body && document.body.innerText.includes('Cerrar Sesión')),
+    { timeout: 30000 }
+  );
+  if (!page.url().includes('sso.miraflores.gob.pe')) {
+    return;
+  }
 
-async function fillKeycloak(page, username, password) {
   await page.waitForSelector(SELECTORS.usernameInput, { timeout: 20000 });
-  await page.click(SELECTORS.usernameInput, { clickCount: 3 });
   await page.type(SELECTORS.usernameInput, username);
   await page.type(SELECTORS.passwordInput, password);
   await page.click(SELECTORS.loginButton);
@@ -74,110 +60,23 @@ async function fillKeycloak(page, username, password) {
   );
 }
 
-async function waitForSsoOrText(page, text) {
-  await page.waitForFunction(
-    (needle) =>
-      location.href.includes('sso.miraflores.gob.pe') ||
-      (document.body && document.body.innerText.includes(needle)),
-    { timeout: 30000 },
-    text
-  );
-}
-
-async function signIn(page, username, password) {
-  await page.goto(LOGIN_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
-  // The app URL loads first; Keycloak is a later redirect. Don't treat the
-  // pre-redirect URL as an existing session.
-  await waitForSsoOrText(page, 'Cerrar Sesión');
-  if (page.url().includes('sso.miraflores.gob.pe')) {
-    await fillKeycloak(page, username, password);
-  }
-}
-
-async function clickVisible(page, selector) {
-  const handle = await page.waitForSelector(selector, { visible: true, timeout: 30000 });
-  const box = await handle.boundingBox();
-  if (!box) {
-    throw new Error(`Date field ${selector} has no bounding box.`);
-  }
-  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-}
-
-async function openCalendar(page, username, password) {
-  await page.goto(BOOKING_URL, { waitUntil: 'networkidle2', timeout: 60000 }).catch(async () => {
-    await page.goto(BOOKING_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
-  });
-  await waitForSsoOrText(page, 'Elige Fecha y Hora');
-  if (page.url().includes('sso.miraflores.gob.pe')) {
-    await fillKeycloak(page, username, password);
-    await page.goto(BOOKING_URL, { waitUntil: 'networkidle2', timeout: 60000 }).catch(async () => {
-      await page.goto(BOOKING_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
-    });
-    await page.waitForFunction(
-      () => document.body && document.body.innerText.includes('Elige Fecha y Hora'),
-      { timeout: 30000 }
-    );
-  }
-
+async function openCalendar(page) {
+  await page.goto(BOOKING_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await page.waitForSelector(SELECTORS.dateFieldToOpenCalendar, {
     visible: true,
     timeout: 30000,
   });
-  await new Promise((r) => setTimeout(r, 2500));
-  const dayCount = await page.$$eval(SELECTORS.dayCell, (cells) => cells.length).catch(() => 0);
-  if (dayCount === 0) {
-    await clickVisible(page, SELECTORS.dateFieldToOpenCalendar);
-  }
+  await page.click(SELECTORS.dateFieldToOpenCalendar);
   await page.waitForSelector(SELECTORS.dayCell, { timeout: 20000 });
-}
-
-async function readDays(page) {
-  return page.$$eval(
-    SELECTORS.dayCell,
-    (cells, { availableClass, fullClass, disabledClass }) =>
-      cells.map((c) => ({
-        label: c.getAttribute('aria-label') || c.textContent.trim(),
-        available: c.classList.contains(availableClass),
-        full: c.classList.contains(fullClass),
-        disabled: c.classList.contains(disabledClass),
-      })),
-    SELECTORS
-  );
 }
 
 (async () => {
   const browser = await puppeteer.launch({
-    headless: 'new',
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+    headless: false,
+    args: ['--no-sandbox', '--disable-setuid-sandbox'],
   });
   const page = await browser.newPage();
   await page.setViewport({ width: 1400, height: 900 });
-  await page.emulateTimezone('America/Lima');
-  page.setDefaultTimeout(60000);
-  page.on('pageerror', (err) => console.error('PAGEERROR', err.message));
-  page.on('console', (msg) => {
-    if (msg.type() === 'error') {
-      console.error('CONSOLE', msg.text());
-    }
-  });
-  page.on('requestfailed', (req) => {
-    const url = req.url();
-    if (url.startsWith('data:') || url.includes('telemetry') || url.includes('_Incapsula_Resource')) {
-      return;
-    }
-    console.error('REQFAIL', req.method(), url, req.failure() && req.failure().errorText);
-  });
-  page.on('response', (res) => {
-    const status = res.status();
-    if (status < 400) {
-      return;
-    }
-    const url = res.url();
-    if (url.includes('_Incapsula_Resource') || url.includes('favicon')) {
-      return;
-    }
-    console.error('HTTP', status, url);
-  });
 
   try {
     const username = process.env.MIRAFLORES_USERNAME;
@@ -189,10 +88,21 @@ async function readDays(page) {
     await signIn(page, username, password);
     console.log('Logged in at', page.url());
 
-    await openCalendar(page, username, password);
+    await openCalendar(page);
     console.log('Calendar loaded at', page.url());
 
-    const days = await readDays(page);
+    const days = await page.$$eval(
+      SELECTORS.dayCell,
+      (cells, { availableClass, fullClass, disabledClass }) =>
+        cells.map((c) => ({
+          label: c.getAttribute('aria-label') || c.textContent.trim(),
+          available: c.classList.contains(availableClass),
+          full: c.classList.contains(fullClass),
+          disabled: c.classList.contains(disabledClass),
+        })),
+      SELECTORS
+    );
+
     const availableDates = days.filter((d) => d.available).map((d) => d.label);
     const state = loadState();
     const newDates = availableDates.filter((d) => !state.knownAvailable.includes(d));
@@ -211,9 +121,7 @@ async function readDays(page) {
     state.knownAvailable = availableDates;
     saveState(state);
   } catch (err) {
-    console.error('Error checking courts:', err);
-    await dumpFailure(page);
-    await sendTelegram(`⚠️ Court-checker script hit an error: ${err.message}`);
+    console.error('Error checking courts:', err.message);
     process.exitCode = 1;
   } finally {
     await browser.close();
