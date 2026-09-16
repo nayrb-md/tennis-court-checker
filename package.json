@@ -1,0 +1,14 @@
+{
+  "name": "tennis-court-checker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Checks apps.miraflores.gob.pe for newly opened tennis court slots and pings Telegram when they appear.",
+  "scripts": {
+    "check": "node checkCourts.js",
+    "inspect": "node inspectCalendar.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "puppeteer": "^23.6.0"
+  }
+}

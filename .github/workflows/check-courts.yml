@@ -1,0 +1,42 @@
+name: Check Tennis Court Availability
+
+# Peru (America/Lima) is UTC-5 year-round. Window: 6:00 AM – 9:00 PM Peru
+# = 11:00–02:00 UTC, every 30 minutes.
+on:
+  schedule:
+    - cron: '0,30 11-23 * * *'   # 6:00 AM – 6:30 PM Peru
+    - cron: '0,30 0-1 * * *'     # 7:00 PM – 8:30 PM Peru
+    - cron: '0 2 * * *'          # 9:00 PM Peru
+  workflow_dispatch: {}          # lets you trigger a run manually from the Actions tab
+
+permissions:
+  contents: write                # needed so the job can commit the updated state.json
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run court check
+        env:
+          MIRAFLORES_USERNAME: ${{ secrets.MIRAFLORES_USERNAME }}
+          MIRAFLORES_PASSWORD: ${{ secrets.MIRAFLORES_PASSWORD }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: node checkCourts.js
+
+      - name: Commit updated state (if changed)
+        run: |
+          git config user.name "court-checker-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add state.json
+          git diff --staged --quiet || git commit -m "Update known-available state"
+          git push
