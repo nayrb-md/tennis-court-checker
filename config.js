@@ -19,9 +19,9 @@ module.exports = {
     passwordInput: '#password',
     loginButton: 'button[name="login"]',
 
-    // Fallback click if day cells aren't in the DOM yet. The live page
-    // shows an inline calendar, so this is usually unnecessary.
-    dateFieldToOpenCalendar: 'input.flatpickr-input',
+    // Visible date field on Paso 1. The calendar is a flatpickr popup;
+    // clicking the often-hidden input.flatpickr-input does not open it.
+    dateFieldToOpenCalendar: 'input[placeholder="Elige una fecha..."]',
 
     // No separate cement/hard-court filter click was found in the capture —
     // the calendar shown was already scoped to a court type selected in a

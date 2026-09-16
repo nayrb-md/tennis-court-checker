@@ -42,12 +42,21 @@ async function sendTelegram(message) {
 async function dumpFailure(page) {
   const url = page.url();
   const title = await page.title().catch(() => '');
-  const text = await page
-    .evaluate(() => (document.body && document.body.innerText ? document.body.innerText.slice(0, 2000) : ''))
-    .catch(() => '');
+  const details = await page
+    .evaluate(() => ({
+      text: document.body && document.body.innerText ? document.body.innerText.slice(0, 2000) : '',
+      dayCount: document.querySelectorAll('.flatpickr-day').length,
+      calendarCount: document.querySelectorAll('.flatpickr-calendar').length,
+      inputs: [...document.querySelectorAll('input')].map((el) => ({
+        placeholder: el.placeholder,
+        className: String(el.className).slice(0, 80),
+        display: getComputedStyle(el).display,
+      })),
+    }))
+    .catch(() => ({}));
   console.error('Failed at', url);
   console.error('Title:', title);
-  console.error('Page text:\n', text);
+  console.error('Calendar debug:', JSON.stringify(details, null, 2));
   await page.screenshot({ path: FAILURE_SCREENSHOT, fullPage: true }).catch((err) => {
     console.error('Screenshot failed:', err.message);
   });
@@ -97,18 +106,12 @@ async function openCalendar(page, username, password) {
     );
   }
 
-  await page.evaluate((sel) => {
-    const el = document.querySelector(sel);
-    if (el) {
-      el.click();
-    }
-  }, SELECTORS.dateFieldToOpenCalendar);
-
-  await page.waitForFunction(
-    (dayCell) => document.querySelectorAll(dayCell).length > 0,
-    { timeout: 30000 },
-    SELECTORS.dayCell
-  );
+  await page.waitForSelector(SELECTORS.dateFieldToOpenCalendar, {
+    visible: true,
+    timeout: 30000,
+  });
+  await page.click(SELECTORS.dateFieldToOpenCalendar);
+  await page.waitForSelector(SELECTORS.dayCell, { timeout: 15000 });
 }
 
 async function readDays(page) {
