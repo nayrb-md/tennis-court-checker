@@ -1,13 +1,10 @@
 name: Check Tennis Court Availability
 
-# Peru (America/Lima) is UTC-5 year-round. Window: 6:00 AM – 9:00 PM Peru
-# = 11:00–02:00 UTC, every 30 minutes.
+# GitHub-hosted runners are blocked by Incapsula on the city site, so the
+# calendar never mounts there. Keep this as a manual debug hook only.
+# The live schedule runs on the Mac via launchd (scripts/install-macos-schedule.sh).
 on:
-  schedule:
-    - cron: '0,30 11-23 * * *'   # 6:00 AM – 6:30 PM Peru
-    - cron: '0,30 0-1 * * *'     # 7:00 PM – 8:30 PM Peru
-    - cron: '0 2 * * *'          # 9:00 PM Peru
-  workflow_dispatch: {}          # lets you trigger a run manually from the Actions tab
+  workflow_dispatch: {}
 
 permissions:
   contents: write                # needed so the job can commit the updated state.json

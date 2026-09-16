@@ -3,4 +3,5 @@ node_modules/
 .DS_Store
 calendar-dump.html
 failure.png
+logs/
 

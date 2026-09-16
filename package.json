@@ -5,6 +5,7 @@
   "description": "Checks apps.miraflores.gob.pe for newly opened tennis court slots and pings Telegram when they appear.",
   "scripts": {
     "check": "node checkCourts.js",
+    "schedule": "node scripts/runScheduledCheck.js",
     "inspect": "node inspectCalendar.js"
   },
   "dependencies": {

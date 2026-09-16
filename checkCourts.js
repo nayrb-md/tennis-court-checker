@@ -104,11 +104,15 @@ async function clickVisible(page, selector) {
 }
 
 async function openCalendar(page, username, password) {
-  await page.goto(BOOKING_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.goto(BOOKING_URL, { waitUntil: 'networkidle2', timeout: 60000 }).catch(async () => {
+    await page.goto(BOOKING_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  });
   await waitForSsoOrText(page, 'Elige Fecha y Hora');
   if (page.url().includes('sso.miraflores.gob.pe')) {
     await fillKeycloak(page, username, password);
-    await page.goto(BOOKING_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await page.goto(BOOKING_URL, { waitUntil: 'networkidle2', timeout: 60000 }).catch(async () => {
+      await page.goto(BOOKING_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    });
     await page.waitForFunction(
       () => document.body && document.body.innerText.includes('Elige Fecha y Hora'),
       { timeout: 30000 }
@@ -119,11 +123,11 @@ async function openCalendar(page, username, password) {
     visible: true,
     timeout: 30000,
   });
-  // Angular binds flatpickr after the placeholder input appears. Clicking
-  // earlier leaves calendarCount at 0.
-  await page.waitForSelector(SELECTORS.dateFieldWhenReady, { timeout: 45000 });
-  await page.waitForNetworkIdle({ idleTime: 1500, timeout: 15000 }).catch(() => {});
-  await clickVisible(page, SELECTORS.dateFieldToOpenCalendar);
+  await new Promise((r) => setTimeout(r, 2500));
+  const dayCount = await page.$$eval(SELECTORS.dayCell, (cells) => cells.length).catch(() => 0);
+  if (dayCount === 0) {
+    await clickVisible(page, SELECTORS.dateFieldToOpenCalendar);
+  }
   await page.waitForSelector(SELECTORS.dayCell, { timeout: 20000 });
 }
 
@@ -148,9 +152,6 @@ async function readDays(page) {
   });
   const page = await browser.newPage();
   await page.setViewport({ width: 1400, height: 900 });
-  await page.setUserAgent(
-    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
-  );
   await page.emulateTimezone('America/Lima');
   page.setDefaultTimeout(60000);
   page.on('pageerror', (err) => console.error('PAGEERROR', err.message));
@@ -161,10 +162,21 @@ async function readDays(page) {
   });
   page.on('requestfailed', (req) => {
     const url = req.url();
-    if (url.startsWith('data:') || url.includes('telemetry')) {
+    if (url.startsWith('data:') || url.includes('telemetry') || url.includes('_Incapsula_Resource')) {
       return;
     }
     console.error('REQFAIL', req.method(), url, req.failure() && req.failure().errorText);
+  });
+  page.on('response', (res) => {
+    const status = res.status();
+    if (status < 400) {
+      return;
+    }
+    const url = res.url();
+    if (url.includes('_Incapsula_Resource') || url.includes('favicon')) {
+      return;
+    }
+    console.error('HTTP', status, url);
   });
 
   try {

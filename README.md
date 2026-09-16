@@ -1,6 +1,8 @@
-# Tennis Court Checker
+# Tennis court checker
 
 Signs in to [apps.miraflores.gob.pe](https://apps.miraflores.gob.pe) with your credentials, checks the reservation calendar, and sends a Telegram message when new dates open. It never books or pays. You still complete checkout yourself.
+
+Run it on your Mac. The city site sits behind Incapsula bot protection, so GitHub-hosted Actions can sign in but never get a working calendar.
 
 ## Create a Telegram bot
 
@@ -8,17 +10,44 @@ Signs in to [apps.miraflores.gob.pe](https://apps.miraflores.gob.pe) with your c
 2. Start a chat with your bot and send any message.
 3. Open `https://api.telegram.org/bot<YOUR_TOKEN>/getUpdates` in a browser, or message **@userinfobot**. Copy the numeric **chat ID**.
 
-## Create the GitHub repository
+## Test locally
 
-1. Create a **public** GitHub repository. Public repositories get unlimited free GitHub Actions minutes.
-2. Push this project to the repository.
-3. Go to **Settings** > **Secrets and variables** > **Actions**.
-4. Add these secrets:
+1. Create a `.env` file in the project folder. Don't commit it.
 
-   - `MIRAFLORES_USERNAME`
-   - `MIRAFLORES_PASSWORD`
-   - `TELEGRAM_BOT_TOKEN`
-   - `TELEGRAM_CHAT_ID`
+   ```
+   MIRAFLORES_USERNAME=your_username
+   MIRAFLORES_PASSWORD=your_password
+   TELEGRAM_BOT_TOKEN=123456:ABC-DEF...
+   TELEGRAM_CHAT_ID=123456789
+   ```
+
+2. Install dependencies and run the checker:
+
+   ```bash
+   npm install
+   npm run check
+   ```
+
+3. Confirm the console lists **Currently available dates** and that Telegram received the message.
+
+## Run the checker on a schedule (macOS)
+
+The checker runs on this Mac every 30 minutes from 6:00 a.m. to 9:59 p.m. Peru time, while the computer is awake.
+
+1. Install the Launch Agent:
+
+   ```bash
+   chmod +x scripts/install-macos-schedule.sh
+   ./scripts/install-macos-schedule.sh
+   ```
+
+2. Check `logs/check.out.log` after the first run.
+
+To stop it:
+
+```bash
+launchctl bootout "gui/$(id -u)/com.nayrb.tennis-court-checker"
+```
 
 ## Review the selectors
 
@@ -31,37 +60,13 @@ Signs in to [apps.miraflores.gob.pe](https://apps.miraflores.gob.pe) with your c
 If the site layout changes and the script can't find those elements, capture the live page:
 
 ```bash
-npm install
 npm run inspect
 ```
 
 A visible browser window opens. Sign in, go to the calendar, return to the terminal, and press Enter. The script writes `calendar-dump.html`. Use that file, or paste it into a coding agent, to update `config.js`.
 
-## Test locally before you rely on the schedule
-
-1. Create a `.env` file in the project folder. Don't commit it.
-
-   ```
-   MIRAFLORES_USERNAME=your_username
-   MIRAFLORES_PASSWORD=your_password
-   TELEGRAM_BOT_TOKEN=123456:ABC-DEF...
-   TELEGRAM_CHAT_ID=123456789
-   ```
-
-2. Run the checker:
-
-   ```bash
-   npm run check
-   ```
-
-3. Confirm the console lists **Currently available dates**. When that looks right, use GitHub Actions for the schedule.
-
-## Run the checker on a schedule
-
-Push to GitHub. The workflow in `.github/workflows/check-courts.yml` runs every 30 minutes from 6:00 a.m. to 9:00 p.m. Peru time (UTC-5). To test a single run, go to the **Actions** tab and select **Run workflow**.
-
 ## How dates are released
 
 The calendar keeps about an eight-day window open (today through today + 7). Later days stay `no-disponible` until they're released. The window rolls forward about one day at a time; a full week doesn't drop at once.
 
-After the checker has run for a few days, use the history of `state.json` or the Actions logs to see when the newest day changes from grey to available. That's the rollover time to plan around.
+After the checker has run for a few days, use the history of `state.json` or `logs/check.out.log` to see when the newest day changes from grey to available. That's the rollover time to plan around.
