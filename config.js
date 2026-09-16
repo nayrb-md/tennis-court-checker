@@ -19,9 +19,10 @@ module.exports = {
     passwordInput: '#password',
     loginButton: 'button[name="login"]',
 
-    // Visible date field on Paso 1. The calendar is a flatpickr popup;
-    // clicking the often-hidden input.flatpickr-input does not open it.
+    // Visible date field on Paso 1. Wait until flatpickr has bound
+    // (input.flatpickr-input) before clicking, or the popup never mounts.
     dateFieldToOpenCalendar: 'input[placeholder="Elige una fecha..."]',
+    dateFieldWhenReady: 'input.flatpickr-input',
 
     // No separate cement/hard-court filter click was found in the capture —
     // the calendar shown was already scoped to a court type selected in a

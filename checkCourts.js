@@ -49,7 +49,7 @@ async function dumpFailure(page) {
       calendarCount: document.querySelectorAll('.flatpickr-calendar').length,
       inputs: [...document.querySelectorAll('input')].map((el) => ({
         placeholder: el.placeholder,
-        className: String(el.className).slice(0, 80),
+        className: String(el.className),
         display: getComputedStyle(el).display,
       })),
     }))
@@ -94,6 +94,15 @@ async function signIn(page, username, password) {
   }
 }
 
+async function clickVisible(page, selector) {
+  const handle = await page.waitForSelector(selector, { visible: true, timeout: 30000 });
+  const box = await handle.boundingBox();
+  if (!box) {
+    throw new Error(`Date field ${selector} has no bounding box.`);
+  }
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+}
+
 async function openCalendar(page, username, password) {
   await page.goto(BOOKING_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await waitForSsoOrText(page, 'Elige Fecha y Hora');
@@ -110,8 +119,12 @@ async function openCalendar(page, username, password) {
     visible: true,
     timeout: 30000,
   });
-  await page.click(SELECTORS.dateFieldToOpenCalendar);
-  await page.waitForSelector(SELECTORS.dayCell, { timeout: 15000 });
+  // Angular binds flatpickr after the placeholder input appears. Clicking
+  // earlier leaves calendarCount at 0.
+  await page.waitForSelector(SELECTORS.dateFieldWhenReady, { timeout: 45000 });
+  await page.waitForNetworkIdle({ idleTime: 1500, timeout: 15000 }).catch(() => {});
+  await clickVisible(page, SELECTORS.dateFieldToOpenCalendar);
+  await page.waitForSelector(SELECTORS.dayCell, { timeout: 20000 });
 }
 
 async function readDays(page) {
@@ -135,7 +148,24 @@ async function readDays(page) {
   });
   const page = await browser.newPage();
   await page.setViewport({ width: 1400, height: 900 });
+  await page.setUserAgent(
+    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+  );
+  await page.emulateTimezone('America/Lima');
   page.setDefaultTimeout(60000);
+  page.on('pageerror', (err) => console.error('PAGEERROR', err.message));
+  page.on('console', (msg) => {
+    if (msg.type() === 'error') {
+      console.error('CONSOLE', msg.text());
+    }
+  });
+  page.on('requestfailed', (req) => {
+    const url = req.url();
+    if (url.startsWith('data:') || url.includes('telemetry')) {
+      return;
+    }
+    console.error('REQFAIL', req.method(), url, req.failure() && req.failure().errorText);
+  });
 
   try {
     const username = process.env.MIRAFLORES_USERNAME;
